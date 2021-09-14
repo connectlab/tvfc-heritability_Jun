@@ -12,69 +12,90 @@ subid_NT = pair_NT(:);
 subid_Unrelated = pair_Unrelated(:);
 
 %% Two-way ANOVA analysis of sibling status x brain states.
-load(fullfile(dir_home, 'scripts2_hmm_main', 'headmotion_FD.mat'), 'meanFD_subj_state*')
 load(fullfile(dir_hmm, ['HMMrun_K' num2str(K) '_rep' num2str(r) '_metrics_subj_statewise_corticalFCM.mat']), 'Yeo_NewmanQ', 'DMNFPN')
 load(fullfile(dir_hmm, ['HMMrun_K' num2str(K) '_rep' num2str(r) '_metrics_subj_statewise.mat']), 'FO_SubState', 'TP_Sub_ord_vector')
 
-Q = Yeo_NewmanQ; clear Yeo_NewmanQ
-FC = DMNFPN; clear DMNFPN
-FO = FO_SubState; clear FO_SubState
-TP = TP_Sub_ord_vector;
 testing_metrics = {'Q','FC','FO','TP'};
 
+
+% Redefine the tangent point: subtract surrogate mean from all subjects.
+load(fullfile(dir_scripts, ['HMMrun_K' num2str(K) '_surrogate_mean.mat']))
+
+FC = DMNFPN - FC_surrogates_mean; clear DMNFPN
+Q = Yeo_NewmanQ-Q_surrogates_mean; clear Yeo_NewmanQ
+FO = FO_SubState - FO_surrogates_mean; clear FO_SubState
+
+ct = 0;
+for i = 1:K
+    for j = 1:K
+        if i == j
+        else ct = ct+1; 
+            TP_surrogates_mean_vector(1, ct) = TP_surrogates_mean(i, j); 
+        end
+    end
+end
+
+for s = 1:size(TP_Sub_ord_vector, 1)
+    TP(s, :) = TP_Sub_ord_vector(s, :) - TP_surrogates_mean_vector;
+end
+clear TP_Sub_ord_vector
+
+
+% The similarity (= Euclidean distance) between pairs.
 for m = 1:length(testing_metrics)
-    twin_pair_label_temp = [];
-    state_label_indiv = [];
+    sibling_label = [];
+    state_label = [];
     
-    eval(['twin_pair_' testing_metrics{m} '_indiv= [];']);
+    eval(['sibling_pair_' testing_metrics{m} '= [];']);
     temp_metrics = eval(testing_metrics{m});
     
-    for i = 1:size(temp_metrics, 2)
-        for t = 1:length(twins)
-            twin_pair = eval(['pair_' twins{t}]);
-            pair1 = subid_ind(ismember(subid, twin_pair(:, 1)));
-            pair2 = subid_ind(ismember(subid, twin_pair(:, 2)));
-            
-            for s = 1:size(twin_pair, 1)
-                temp_norm_twin(s, 1) = norm(temp_metrics(pair1(s), i)- temp_metrics(pair2(s), i));
+    for kk = 1:size(temp_metrics, 2)
+        for g = 1:length(groups)
+            sibling_pair = eval(['pair_' groups{g}]);
+                      
+            for s = 1:size(sibling_pair, 1)
+                pair1 = find(ismember(subid, sibling_pair(s, 1))); 
+                pair2 = find(ismember(subid, sibling_pair(s, 2))); 
+                
+                temp_norm_sibling(s, 1) = norm(temp_metrics(pair1, kk)- temp_metrics(pair2, kk));
+                
+                clear pair1 pair2
             end
             
-            eval(['twin_pair_' testing_metrics{m} '_indiv = vertcat(twin_pair_' testing_metrics{m} '_indiv, temp_norm_twin);']);
+            eval(['sibling_pair_' testing_metrics{m} ' = vertcat(sibling_pair_' testing_metrics{m} ', temp_norm_sibling);']);
             
-            if i == 1
-                twin_pair_label_temp = vertcat(twin_pair_label_temp, repmat(twins(t), size(twin_pair, 1), 1));
+            if kk == 1
+                sibling_label = vertcat(sibling_label, repmat(groups(g), size(sibling_pair, 1), 1));
             end
-            clear temp_norm_twin twin_pair pair1 pair2
+            
+            clear sibling_ppair s temp_norm_sibling
         end
         
         if strcmp(testing_metrics{m}, 'TP')
-            state_label_indiv = vertcat(state_label_indiv, repmat({['TPcomp ' num2str(i)]}, size(twin_pair_label_temp, 1), 1));
+            state_label = vertcat(state_label, repmat({['TPcomp ' num2str(kk)]}, size(sibling_label, 1), 1));
         else
-            state_label_indiv = vertcat(state_label_indiv, repmat({['K ' num2str(i)]}, size(twin_pair_label_temp, 1), 1));
+            state_label = vertcat(state_label, repmat({['K ' num2str(kk)]}, size(sibling_label, 1), 1));
         end
     end
     
-    twin_pair_label_temp = repmat(twin_pair_label_temp, size(temp_metrics, 2), 1);
+    sibling_label = repmat(sibling_label, size(temp_metrics, 2), 1);
     
-    eval(['state_' testing_metrics{m} '_indiv_label= state_label_indiv;']);
-    eval(['twin_pair_' testing_metrics{m} '_indiv_label= twin_pair_label_temp;']);
+    eval(['state_label_' testing_metrics{m} '= state_label;']);
+    eval(['sibling_label_' testing_metrics{m} '= sibling_label;']);
     
-    clear temp_metrics twin_pair_label_temp state_label_indiv
+    clear sibling_label state_label temp_metrics
 end
 
-%%
+%% Two-way ANOVA analysis of sibling similarity x brain states.
+
 for m = 1:length(testing_metrics)
-    clear data sibling_label state_label
-    data = eval(['twin_pair_' testing_metrics{m} '_indiv']);
-    sibling_label = eval(['twin_pair_' testing_metrics{m} '_indiv_label']);
-    state_label = eval(['state_' testing_metrics{m} '_indiv_label']);
+    age_diff = vertcat(age_MZ(:, 1)-age_MZ(:, 2), age_DZ(:, 1)-age_DZ(:, 2), age_NT(:, 1)-age_NT(:, 2), age_Unrelated(:, 1)-age_Unrelated(:, 2));
+    age_diff = repmat(age_diff, size(eval(testing_metrics{m}), 2), 1);
+    data = eval(['sibling_pair_' testing_metrics{m}]);
+    sibling_label = eval(['sibling_label_' testing_metrics{m}]);
+    state_label = eval(['state_label_' testing_metrics{m}]);
     
-    [anova2_p.(testing_metrics{m}),anova2_tab.(testing_metrics{m}),anova2_stats.(testing_metrics{m})] = anovan(data, {sibling_label, state_label},'model','interaction','varnames',{'sibling status','State K'}, 'display', 'off');
-    multcompare(anova2_stats.(testing_metrics{m}));
-        
-    clear temp_* data sibling_label state_label
+    [anovan_p.(testing_metrics{m}),anovan_tab.(testing_metrics{m}),anovan_stats.(testing_metrics{m})] = anovan(data, {sibling_label, state_label, age_diff},'Continuous', 3, 'model','interaction','varnames',{'sibling status','State K', 'age_diff'});
+     
+    clear data sibling_label state_label age_diff 
 end
-
-save(fullfile(dir_output, ['HMMrun_K' num2str(K) '_rep' num2str(r) '_anova2_siblingsimilairity_x_state.mat']), 'anova2_*', 'twin_*', '*_label')
-
-
